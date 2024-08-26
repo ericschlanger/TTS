@@ -6,6 +6,7 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 from coqpit import Coqpit
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from TTS.tts.layers.xtts.gpt import GPT
 from TTS.tts.layers.xtts.hifigan_decoder import HifiDecoder
@@ -150,6 +151,7 @@ class XttsArgs(Coqpit):
         gpt_use_perceiver_resampler (bool, optional):  If True, it will use perceiver resampler from flamingo paper - https://arxiv.org/abs/2204.14198. Defaults to False.
     """
 
+    llm_hidden_dim: int = 4096
     gpt_batch_size: int = 1
     enable_redaction: bool = False
     kv_cache: bool = True
@@ -566,6 +568,7 @@ class Xtts(BaseTTS):
                     cond_latents=gpt_cond_latent,
                     return_attentions=False,
                     return_latent=True,
+                    real_text=[sent],
                 )
 
                 if length_scale != 1.0:
@@ -771,6 +774,13 @@ class Xtts(BaseTTS):
         self.init_models()
 
         checkpoint = self.get_compatible_checkpoint_state_dict(model_path)
+
+        # Initialize new parameters if they're missing from the checkpoint
+        model_dict = self.state_dict()
+        for key in model_dict:
+            if key not in checkpoint:
+                print(f"Initializing {key} with default values.")
+                checkpoint[key] = model_dict[key]
 
         # deal with v1 and v1.1. V1 has the init_gpt_for_inference keys, v1.1 do not
         try:

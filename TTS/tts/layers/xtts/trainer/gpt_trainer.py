@@ -9,6 +9,7 @@ from torch.nn import functional as F
 from torch.utils.data import DataLoader
 from trainer.torch import DistributedSampler
 from trainer.trainer_utils import get_optimizer, get_scheduler
+from TTS.utils.generic_utils import count_parameters
 
 from TTS.tts.configs.xtts_config import XttsConfig
 from TTS.tts.datasets.dataset import TTSDataset
@@ -195,11 +196,18 @@ class GPTTrainer(BaseTTS):
             mel_norm_file=self.args.mel_norm_file, sampling_rate=config.audio.dvae_sample_rate
         )
 
+        for name, param in self.xtts.named_parameters():
+            if 'cross_attention' not in name:
+                param.requires_grad = False
+            else:
+                param.requires_grad = True
+
+
     @property
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, text_inputs, text_lengths, audio_codes, wav_lengths, cond_mels, cond_idxs, cond_lens):
+    def forward(self, text_inputs, text_lengths, audio_codes, wav_lengths, cond_mels, cond_idxs, cond_lens, real_text):
         """
         Forward pass that uses both text and voice in either text conditioning mode or voice conditioning mode
         (actuated by `text_first`).
@@ -220,6 +228,7 @@ class GPTTrainer(BaseTTS):
             cond_mels=cond_mels,
             cond_idxs=cond_idxs,
             cond_lens=cond_lens,
+            real_text=real_text,
         )
         return losses
 
@@ -304,9 +313,10 @@ class GPTTrainer(BaseTTS):
         wav_lengths = batch["wav_lengths"]
         cond_idxs = batch["cond_idxs"]
         cond_lens = batch["cond_lens"]
+        real_text = batch["real_text"]
 
         loss_text, loss_mel, _ = self.forward(
-            text_inputs, text_lengths, audio_codes, wav_lengths, cond_mels, cond_idxs, cond_lens
+            text_inputs, text_lengths, audio_codes, wav_lengths, cond_mels, cond_idxs, cond_lens, real_text,
         )
         loss_dict["loss_text_ce"] = loss_text * self.args.gpt_loss_text_ce_weight
         loss_dict["loss_mel_ce"] = loss_mel * self.args.gpt_loss_mel_ce_weight
@@ -391,7 +401,7 @@ class GPTTrainer(BaseTTS):
                 loader = DataLoader(
                     dataset,
                     sampler=sampler,
-                    batch_size = config.eval_batch_size if is_eval else config.batch_size,
+                    batch_size=config.eval_batch_size if is_eval else config.batch_size,
                     collate_fn=dataset.collate_fn,
                     num_workers=config.num_eval_loader_workers if is_eval else config.num_loader_workers,
                     pin_memory=False,

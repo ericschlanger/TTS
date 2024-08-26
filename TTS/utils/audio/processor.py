@@ -140,15 +140,15 @@ class AudioProcessor(object):
 
     def __init__(
         self,
-        sample_rate=None,
+        sample_rate=22050,
         resample=False,
-        num_mels=None,
+        num_mels=80,
         log_func="np.log10",
         min_level_db=None,
         frame_shift_ms=None,
         frame_length_ms=None,
-        hop_length=None,
-        win_length=None,
+        hop_length=256,
+        win_length=1024,
         ref_level_db=None,
         fft_size=1024,
         power=None,
@@ -157,7 +157,7 @@ class AudioProcessor(object):
         symmetric_norm=None,
         max_norm=None,
         mel_fmin=None,
-        mel_fmax=None,
+        mel_fmax=8000,
         pitch_fmax=None,
         pitch_fmin=None,
         spec_gain=20,
@@ -181,8 +181,8 @@ class AudioProcessor(object):
         self.num_mels = num_mels
         self.log_func = log_func
         self.min_level_db = min_level_db or 0
-        self.frame_shift_ms = frame_shift_ms
-        self.frame_length_ms = frame_length_ms
+        self.frame_shift_ms = 12.5 if frame_shift_ms is None else frame_shift_ms
+        self.frame_length_ms = 50 if frame_length_ms is None else frame_length_ms
         self.ref_level_db = ref_level_db
         self.fft_size = fft_size
         self.power = power

@@ -81,7 +81,7 @@ class XTTSDataset(torch.utils.data.Dataset):
         new_samples = []
         for sample in self.samples:
             try:
-                tseq, _, wav, _, _, _ = self.load_item(sample)
+                tseq, _, wav, _, _, _, _ = self.load_item(sample)
             except:
                 continue
             # Basically, this audio file is nonexistent or too long to be supported by the dataset.
@@ -133,7 +133,7 @@ class XTTSDataset(torch.utils.data.Dataset):
             # if do not use masking use cond_len
             cond_idxs = torch.nan
 
-        return tseq, audiopath, wav, cond, cond_len, cond_idxs
+        return tseq, audiopath, wav, cond, cond_len, cond_idxs, sample["text"]
 
     def __getitem__(self, index):
         if self.is_eval:
@@ -157,7 +157,7 @@ class XTTSDataset(torch.utils.data.Dataset):
 
         # try to load the sample, if fails added it to the failed samples list
         try:
-            tseq, audiopath, wav, cond, cond_len, cond_idxs = self.load_item(sample)
+            tseq, audiopath, wav, cond, cond_len, cond_idxs, text = self.load_item(sample)
         except:
             if self.debug_failures:
                 print(f"error loading {sample['audio_file']} {sys.exc_info()}")
@@ -180,7 +180,7 @@ class XTTSDataset(torch.utils.data.Dataset):
             return self[1]
 
         res = {
-            # 'real_text': text,
+            "real_text": text,
             "text": tseq,
             "text_lengths": torch.tensor(tseq.shape[0], dtype=torch.long),
             "wav": wav,
