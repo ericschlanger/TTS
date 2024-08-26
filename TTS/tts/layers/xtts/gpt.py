@@ -17,33 +17,6 @@ from TTS.tts.layers.xtts.perceiver_encoder import PerceiverResampler
 def null_position_embeddings(range, dim):
     return torch.zeros((range.shape[0], range.shape[1], dim), device=range.device)
 
-
-class CrossAttention(nn.Module):
-    def __init__(self, query_dim, key_dim, num_heads=8):
-        super().__init__()
-        self.num_heads = num_heads
-        self.scale = (key_dim // num_heads) ** -0.5
-        self.to_q = nn.Linear(query_dim, key_dim, bias=False)
-        self.to_k = nn.Linear(key_dim, key_dim, bias=False)
-        self.to_v = nn.Linear(key_dim, key_dim, bias=False)
-        self.to_out = nn.Linear(key_dim, query_dim)
-
-    def forward(self, x, context):
-        h = self.num_heads
-        q = self.to_q(x)
-        k = self.to_k(context)
-        v = self.to_v(context)
-        
-        q, k, v = map(lambda t: t.view(t.shape[0], -1, h, t.shape[-1] // h).transpose(1, 2), (q, k, v))
-        
-        attn = torch.einsum('bhid,bhjd->bhij', q, k) * self.scale
-        attn = F.softmax(attn, dim=-1)
-        
-        out = torch.einsum('bhij,bhjd->bhid', attn, v)
-        out = out.transpose(1, 2).reshape(out.shape[0], -1, out.shape[-1] * h)
-        return self.to_out(out)
-
-
 class LearnedPositionEmbeddings(nn.Module):
     def __init__(self, seq_len, model_dim, init=0.02, relative=False):
         super().__init__()
@@ -187,10 +160,6 @@ class GPT(nn.Module):
 
         self.llama_proj = nn.Linear(llm_hidden_dim, model_dim)
 
-        # nn.init.xavier_uniform_(self.llm_projection.weight)
-        # nn.init.zeros_(self.llm_projection.bias)
-        
-        # self.cross_attention = CrossAttention(model_dim, llm_hidden_dim)
         self.cross_attention = nn.MultiheadAttention(
             embed_dim=model_dim,
             num_heads=heads,
@@ -428,20 +397,11 @@ class GPT(nn.Module):
         return conds
 
     def get_llama_hidden_state(self, texts):
-        # Initialize tokenizer and model
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        
-        # Tokenize input text
-        # inputs = self.tokenizer(text, return_tensors="pt").to(device)
         inputs = self.tokenizer(texts, return_tensors="pt", padding=True, truncation=True).to(device)
-        
-        # Get model output
         with torch.no_grad():
             outputs = self.llama(**inputs, output_hidden_states=True)
-        
-        # Extract the last hidden state
         return outputs.hidden_states[-1]
-
 
     def forward(
         self,
@@ -589,7 +549,6 @@ class GPT(nn.Module):
             key=llm_hidden_state,
             value=llm_hidden_state
         )
-        # cross_attn_output = cross_attn_output.transpose(0, 1)
 
         # Compute speech conditioning input
         if cond_latents is None:
