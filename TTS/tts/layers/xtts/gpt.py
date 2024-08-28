@@ -17,6 +17,86 @@ from TTS.tts.layers.xtts.perceiver_encoder import PerceiverResampler
 def null_position_embeddings(range, dim):
     return torch.zeros((range.shape[0], range.shape[1], dim), device=range.device)
 
+
+class CrossAttentionLayer(nn.Module):
+    def __init__(self, hidden_size, num_heads):
+        super().__init__()
+        self.cross_attention = nn.MultiheadAttention(hidden_size, num_heads, batch_first=True)
+        self.layer_norm = nn.LayerNorm(hidden_size)
+
+    def forward(self, x, context):
+        residual = x
+        x, _ = self.cross_attention(x, context, context)
+        x = self.layer_norm(residual + x)
+        return x
+
+
+class GPTLayerWithCrossAttention(nn.Module):
+    def __init__(self, gpt_layer, cross_attention_layer=None):
+        super().__init__()
+        self.gpt_layer = gpt_layer
+        self.cross_attention_layer = cross_attention_layer
+        self.llm_hidden_state = None
+        # Get hidden size from the GPT layer
+        hidden_size = gpt_layer.attn.embed_dim
+        
+        # Add components for the full transformer block
+        self.ln_1 = nn.LayerNorm(hidden_size)
+        self.ln_2 = nn.LayerNorm(hidden_size)
+        
+        # Feed Forward layer
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_size, 4 * hidden_size),
+            nn.GELU(),
+            nn.Linear(4 * hidden_size, hidden_size),
+            nn.Dropout(0.1)
+        )
+
+    def set_llm_hidden_state(self, llm_hidden_state):
+        self.llm_hidden_state = llm_hidden_state
+
+    def forward(
+        self,
+        hidden_states,
+        attention_mask=None,
+        use_cache=False,
+        layer_past=None,
+        head_mask=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        output_attentions=None,
+    ):
+        gpt_outputs = self.gpt_layer(
+            hidden_states,
+            attention_mask=attention_mask,
+            use_cache=use_cache,
+            layer_past=layer_past,
+            head_mask=head_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            output_attentions=output_attentions,
+        )
+        hidden_states = gpt_outputs[0]
+        
+        if self.cross_attention_layer is not None and self.llm_hidden_state is not None:
+            residual = hidden_states
+            hidden_states = self.ln_1(hidden_states)
+            hidden_states = self.cross_attention_layer(hidden_states, self.llm_hidden_state)
+            hidden_states = residual + hidden_states
+
+            # Feed Forward Network
+            residual = hidden_states
+            hidden_states = self.ln_2(hidden_states)
+            hidden_states = self.mlp(hidden_states)
+            hidden_states = residual + hidden_states
+        # else:
+        #     raise ValueError('llm_hidden_state was not set')
+        
+        if use_cache:
+            return (hidden_states,) + gpt_outputs[1:]
+        return (hidden_states,)
+
+
 class LearnedPositionEmbeddings(nn.Module):
     def __init__(self, seq_len, model_dim, init=0.02, relative=False):
         super().__init__()
@@ -160,14 +240,6 @@ class GPT(nn.Module):
 
         self.llama_proj = nn.Linear(llm_hidden_dim, model_dim)
 
-        self.cross_attention = nn.MultiheadAttention(
-            embed_dim=model_dim,
-            num_heads=heads,
-            batch_first=True,
-            kdim=model_dim,
-            vdim=model_dim,
-        )
-
         self.text_embedding = nn.Embedding(self.number_text_tokens, model_dim)
         self.mel_embedding = nn.Embedding(self.num_audio_tokens, model_dim)
 
@@ -213,6 +285,21 @@ class GPT(nn.Module):
             # XTTS v1
             self.prompt_embedding = nn.Embedding(self.num_audio_tokens, model_dim)
             self.prompt_pos_embedding = LearnedPositionEmbeddings(24 * 9, model_dim)
+        
+        self.cross_attention_interval = 3
+
+        new_layers = nn.ModuleList()
+        for i, layer in enumerate(self.gpt.h):
+            if (i + 1) % self.cross_attention_interval == 0:
+                new_layers.append(GPTLayerWithCrossAttention(
+                    layer, 
+                    CrossAttentionLayer(self.gpt.config.hidden_size, self.gpt.config.num_attention_heads),
+                ))
+            else:
+                new_layers.append(layer)
+
+        self.gpt.h = new_layers
+
 
     def get_grad_norm_parameter_groups(self):
         return {
@@ -536,19 +623,12 @@ class GPT(nn.Module):
         # Compute mel embeddings + positional embeddings
         mel_emb = self.mel_embedding(audio_codes) + self.mel_pos_embedding(audio_codes)
 
+        # Get the hidden state and assign it to every wrapped xattn layer
         llm_hidden_state = self.get_llama_hidden_state(real_text)
         llm_hidden_state = self.llama_proj(llm_hidden_state)
-
-        if len(text_emb.shape) == 2:
-            text_emb = text_emb.unsqueeze(0)
-        if len(llm_hidden_state.shape) == 2:
-            llm_hidden_state = llm_hidden_state.unsqueeze(0)
-
-        cross_attn_output, _ = self.cross_attention(
-            query=text_emb,
-            key=llm_hidden_state,
-            value=llm_hidden_state
-        )
+        for i, layer in enumerate(self.gpt.h):
+            if (i + 1) % self.cross_attention_interval == 0:
+                layer.set_llm_hidden_state(llm_hidden_state)
 
         # Compute speech conditioning input
         if cond_latents is None:
@@ -560,7 +640,7 @@ class GPT(nn.Module):
             sub = -1
 
         text_logits, mel_logits = self.get_logits(
-            cross_attn_output,
+            text_emb,
             self.text_head,
             mel_emb,
             self.mel_head,

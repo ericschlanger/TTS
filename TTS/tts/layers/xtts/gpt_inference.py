@@ -68,6 +68,7 @@ class GPT2InferenceModel(GPT2PreTrainedModel):
         output_attentions=None,
         output_hidden_states=None,
         return_dict=None,
+        real_text=None,
     ):
         assert self.cached_prefix_emb is not None
         assert inputs_embeds is None  # Not supported by this inference model.

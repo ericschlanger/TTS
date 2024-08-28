@@ -10,12 +10,12 @@ CONFIG_PATH = "/data/ericschlanger/TTS/recipes/ljspeech/xtts_v2/run/training/GPT
 VOCAB_PATH = "/data/ericschlanger/TTS/recipes/ljspeech/xtts_v2/run/training/XTTS_v2.0_original_model_files/vocab.json"
 # Add here the checkpoint that you want to do inference with
 # XTTS_CHECKPOINT = "/data/ericschlanger/TTS/recipes/ljspeech/xtts_v2/run/training/XTTS_v2.0_original_model_files/model.pth"
-XTTS_CHECKPOINT = "/data/ericschlanger/TTS/recipes/ljspeech/xtts_v2/run/training/GPT_XTTS_v2.0_LJSpeech_FT-August-19-2024_12+08PM-dbf1a08a/checkpoint_183.pth"
+XTTS_CHECKPOINT = "/data/ericschlanger/TTS/recipes/ljspeech/xtts_v2/run/training/GPT_XTTS_v2.0_LJSpeech_FT-August-28-2024_11+32AM-496e5a8c/checkpoint_3365.pth"
 # Add here the speaker reference
 SPEAKER_REFERENCE = "/data/ericschlanger/TTS/example.wav"
 
 # output wav path
-OUTPUT_WAV_PATH = "xtts-ft2.wav"
+OUTPUT_WAV_PATH = "xtts-ft3.wav"
 
 print("Loading model...")
 config = XttsConfig()
